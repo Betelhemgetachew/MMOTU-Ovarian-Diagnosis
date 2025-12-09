@@ -10,7 +10,7 @@ import cv2
 from PIL import Image
 import os
 from fpdf import FPDF
-import gdown  # <--- NEW: Handles the Google Drive download
+import gdown
 
 # =========================
 # Page Configuration
@@ -31,7 +31,6 @@ st.markdown("""
     h1 { color: #4da6ff; text-align: center; }
     .stAlert { background-color: #262730; color: #fafafa; border: 1px solid #4da6ff; }
     div.stButton > button { background-color: #4da6ff; color: white; border-radius: 8px; width: 100%; }
-    /* Make the diagnosis text pop */
     .diagnosis-text { font-weight: bold; font-size: 24px; padding: 10px; border-radius: 5px; }
     </style>
 """, unsafe_allow_html=True)
@@ -42,14 +41,12 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # =========================
 # 1. Configuration & Paths
 # =========================
-# Get the folder where this script (app.py) is located
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(BASE_DIR, "models")
 
 # Ensure models folder exists
 os.makedirs(MODEL_DIR, exist_ok=True)
 
-# Define Local Paths for where models WILL be saved
 SEG_MODEL_PATH = os.path.join(MODEL_DIR, "mmotu_segmentation_best_model.pth")
 CLS_MODEL_PATH = os.path.join(MODEL_DIR, "mmotu_classifier_fullimage_best.pth")
 
@@ -65,7 +62,7 @@ CLASS_NAMES = [
 ]
 NUM_CLASSES = len(CLASS_NAMES)
 
-# --- Medical Dictionary for User Context ---
+# --- Medical Dictionary ---
 MEDICAL_INFO = {
     "Normal Ovary": "Healthy ovarian tissue with no visible abnormalities.",
     "Simple Cyst": "A fluid-filled sac. Most are benign and often resolve on their own.",
@@ -105,7 +102,7 @@ def create_pdf(diagnosis, confidence, image_path, notes=""):
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(140, 10, txt=f"{diagnosis}", ln=1, align='L')
     
-    # Add Definition to PDF
+    # Add Definition
     definition = MEDICAL_INFO.get(diagnosis, "")
     if definition:
         pdf.set_font("Arial", 'I', 10)
@@ -130,23 +127,21 @@ def create_pdf(diagnosis, confidence, image_path, notes=""):
     return pdf.output(dest="S").encode("latin-1")
 
 # =========================
-# 3. Load Models (With Auto-Download)
+# 3. Load Models (Spinner / Invisible Download)
 # =========================
 @st.cache_resource
 def load_models():
-    # --- Auto-Download Logic ---
-    # This runs ONLY if the models are missing from the folder
-    if not os.path.exists(SEG_MODEL_PATH):
-        st.info("Downloading Segmentation Model from Google Drive... (This happens once)")
-        url = f'https://drive.google.com/uc?id={SEG_FILE_ID}'
-        gdown.download(url, SEG_MODEL_PATH, quiet=False)
+    # Only show spinner if models are missing
+    if not os.path.exists(SEG_MODEL_PATH) or not os.path.exists(CLS_MODEL_PATH):
+        with st.spinner("Setting up AI models... (This happens once)"):
+            if not os.path.exists(SEG_MODEL_PATH):
+                url = f'https://drive.google.com/uc?id={SEG_FILE_ID}'
+                gdown.download(url, SEG_MODEL_PATH, quiet=False)
 
-    if not os.path.exists(CLS_MODEL_PATH):
-        st.info("Downloading Classifier Model from Google Drive... (This happens once)")
-        url = f'https://drive.google.com/uc?id={CLS_FILE_ID}'
-        gdown.download(url, CLS_MODEL_PATH, quiet=False)
+            if not os.path.exists(CLS_MODEL_PATH):
+                url = f'https://drive.google.com/uc?id={CLS_FILE_ID}'
+                gdown.download(url, CLS_MODEL_PATH, quiet=False)
 
-    # --- Define Architectures ---
     seg_model = smp.Unet(encoder_name="resnet34", encoder_weights=None, in_channels=3, classes=1, activation="sigmoid")
     cls_model = models.resnet18(weights=None)
     cls_model.fc = nn.Linear(cls_model.fc.in_features, NUM_CLASSES)
@@ -254,13 +249,13 @@ if uploaded_file and seg_model and cls_model:
         st.image(image, caption="Original Ultrasound", use_container_width=True)
 
     with st.spinner("Analyzing tissue structure..."):
-        # Task 1: Segmentation
+        # Task 1
         mask, overlay = process_segmentation(image, threshold=seg_threshold)
         
         with col2:
             st.image(overlay, caption="AI Segmentation (Transparent Overlay)", use_container_width=True)
 
-        # Task 2: Zoom
+        # Task 2
         tumor_found = np.sum(mask) > 0
         if tumor_found:
             cropped_view = crop_tumor_region(image, mask)
@@ -271,7 +266,7 @@ if uploaded_file and seg_model and cls_model:
              with col3:
                 st.info("No distinct tumor region found for zooming.")
 
-        # Task 3: Classification
+        # Task 3
         probs = predict_class(image) 
         top_idx = np.argmax(probs)
         confidence = probs[top_idx]
@@ -297,7 +292,6 @@ if uploaded_file and seg_model and cls_model:
                 st.markdown(f"<h2 style='color: {color};'>{diagnosis}</h2>", unsafe_allow_html=True)
                 st.metric("Confidence Score", f"{confidence*100:.2f}%")
                 
-                # --- NEW: Display Medical Context ---
                 definition = MEDICAL_INFO.get(diagnosis, "No detailed definition available.")
                 st.info(f"ℹ️ **What is this?**\n\n{definition}")
 
